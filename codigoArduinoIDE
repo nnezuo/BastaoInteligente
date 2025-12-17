@@ -1,0 +1,164 @@
+#include "Adafruit_VL53L0X.h"
+
+// ---------------------- VL53L0X ----------------------
+Adafruit_VL53L0X lox_esq = Adafruit_VL53L0X();
+Adafruit_VL53L0X lox_dir = Adafruit_VL53L0X();
+
+#define XSHUT_ESQ 17
+#define XSHUT_DIR 16
+
+// ---------------------- MOTORES DE VIBRAÇÃO -------------------
+#define VIBRA_ESQ 25
+#define VIBRA_DIR 26
+
+// ---------------------- HC-SR04 ----------------------
+#define TRIG 27
+#define ECHO 14
+
+// ---------------------- BUZZER -----------------------
+#define BUZZER 32
+
+// ---------------------- LIMITES ----------------------
+#define DIST_ALERTA_LASER 300  
+#define DIST_ALERTA_HCSR04 100   // 1 metro
+
+// =====================================================
+// FUNÇÃO: Ler HC-SR04
+// =====================================================
+long readUltrasonic() {
+  digitalWrite(TRIG, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+
+  long duration = pulseIn(ECHO, HIGH, 30000);
+  if (duration == 0) return -1;
+
+  return duration * 0.034 / 2; // cm
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  Serial.println("\n=====================================");
+  Serial.println("     INICIALIZANDO SENSORES...");
+  Serial.println("=====================================");
+
+  pinMode(XSHUT_ESQ, OUTPUT);
+  pinMode(XSHUT_DIR, OUTPUT);
+
+  pinMode(VIBRA_ESQ, OUTPUT);
+  pinMode(VIBRA_DIR, OUTPUT);
+  digitalWrite(VIBRA_ESQ, LOW);
+  digitalWrite(VIBRA_DIR, LOW);
+
+  pinMode(BUZZER, OUTPUT);
+  noTone(BUZZER);   // garante buzzer desligado
+
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+
+  // Reset dos VL53
+  digitalWrite(XSHUT_ESQ, LOW);
+  digitalWrite(XSHUT_DIR, LOW);
+  delay(20);
+
+  // Liga esquerdo (0x30)
+  digitalWrite(XSHUT_ESQ, HIGH);
+  delay(10);
+  if (!lox_esq.begin(0x30)) {
+    Serial.println("ERRO: VL53L0X ESQUERDO NAO INICIOU!");
+    while (1);
+  }
+
+  // Liga direito (0x31)
+  digitalWrite(XSHUT_DIR, HIGH);
+  delay(10);
+  if (!lox_dir.begin(0x31)) {
+    Serial.println("ERRO: VL53L0X DIREITO NAO INICIOU!");
+    while (1);
+  }
+
+  Serial.println("Sensores prontos!");
+  Serial.println("=====================================\n");
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+void loop() {
+
+  // ---------- VL53 ESQUERDO ----------
+  VL53L0X_RangingMeasurementData_t esq;
+  lox_esq.rangingTest(&esq, false);
+  int dist_esq = (esq.RangeStatus != 4) ? esq.RangeMilliMeter : -1;
+  bool alerta_esq = (dist_esq > 0 && dist_esq <= DIST_ALERTA_LASER);
+
+  // ---------- VL53 DIREITO ----------
+  VL53L0X_RangingMeasurementData_t dir;
+  lox_dir.rangingTest(&dir, false);
+  int dist_dir = (dir.RangeStatus != 4) ? dir.RangeMilliMeter : -1;
+  bool alerta_dir = (dist_dir > 0 && dist_dir <= DIST_ALERTA_LASER);
+
+  // ---------- ULTRASSOM ----------
+  long dist_ultra = readUltrasonic();
+
+  // ---------- BUZZER (IGUAL AO CÓDIGO ORIGINAL) ----------
+  if (dist_ultra > 0 && dist_ultra <= DIST_ALERTA_HCSR04) {
+
+    int freq = map(dist_ultra, 100, 5, 400, 2500);
+    freq = constrain(freq, 400, 2500);
+
+    int intervalo = map(dist_ultra, 100, 5, 300, 20);
+
+    tone(BUZZER, freq);
+    delay(intervalo);
+    noTone(BUZZER);
+    delay(intervalo);
+
+  } else {
+    noTone(BUZZER);
+  }
+
+  // ---------- MOTORES DE VIBRAÇÃO ----------
+  digitalWrite(VIBRA_ESQ, alerta_esq ? HIGH : LOW);
+  digitalWrite(VIBRA_DIR, alerta_dir ? HIGH : LOW);
+
+  // ---------- SERIAL ----------
+  Serial.println("=====================================");
+  Serial.println("            LEITURAS ATUAIS          ");
+  Serial.println("=====================================");
+
+  Serial.print("Laser ESQ: ");
+  if (dist_esq > 0) {
+    Serial.print(dist_esq);
+    Serial.print(" mm");
+    if (alerta_esq) Serial.print("  ⚠ ALERTA");
+  } else Serial.print("fora de alcance");
+  Serial.println();
+
+  Serial.print("Laser DIR: ");
+  if (dist_dir > 0) {
+    Serial.print(dist_dir);
+    Serial.print(" mm");
+    if (alerta_dir) Serial.print("  ⚠ ALERTA");
+  } else Serial.print("fora de alcance");
+  Serial.println();
+
+  Serial.print("Ultrassom: ");
+  if (dist_ultra > 0) {
+    Serial.print(dist_ultra);
+    Serial.print(" cm");
+  } else Serial.print("erro na leitura");
+  Serial.println();
+
+  Serial.println("=====================================\n");
+
+  delay(80);
+}
